@@ -75,6 +75,8 @@ Luego, en la hoja, menú **🥐 Quisito**:
 - **Revisar qué panes venden (brownies, galletas…)**: busca en Google cada pan (brownies, cuernitos, roles, crumble cookies, galletas)
   por zona y llena la columna `Vende` de los lugares que ya tienes. En el mapa sale el aviso ⚠️ en la ficha y el filtro "¿Qué pan venden?".
   La lista de panes está en `PANES` de `Code.gs` y `config.js`.
+- **Llenar teléfonos y páginas web (desde Google)**: para los lugares que ya tienes sin teléfono. Los nuevos ya llegan con teléfono y web.
+  El encargado/chef (`Contacto`) se sigue llenando a mano.
 - **Llenar colonias vacías (desde la dirección)**: pone la colonia a los lugares que se agregaron sin ella.
 - **Quitar cadenas y lugares que no nos interesan**: limpia lo que se haya colado (te enseña la lista antes de borrar).
 - **Actualizar pestaña COLONIAS**: resumen por colonia, estado y tipo, con gráficas.

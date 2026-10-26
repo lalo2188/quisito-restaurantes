@@ -15,7 +15,7 @@ var PIN = '';
 var HOJA_TIENDAS = 'Prospectos';
 var HOJA_ENTREGAS = 'Pedidos';
 var COLUMNAS_BASE = ['Prioridad', 'Zona', 'Tipo', 'Nombre', 'Ubicación', 'Visitado', 'Maps', 'Notas'];
-var COLUMNAS_EXTRA = ['Estado', 'Lat', 'Lng', 'Contacto', 'Teléfono', 'Vende'];
+var COLUMNAS_EXTRA = ['Estado', 'Lat', 'Lng', 'Contacto', 'Teléfono', 'Vende', 'Web'];
 // Los productos deben coincidir con PRODUCTOS de config.js (columna = nombre de la columna aquí).
 var PRODUCTOS = ['Quisito', 'Panes', 'Postres'];
 var COLUMNAS_ENTREGAS = ['Fecha', 'Lugar'].concat(PRODUCTOS, ['Precio', 'Seguimiento', 'Tipo', 'Notas']);
@@ -74,6 +74,7 @@ function onOpen() {
     .addItem('Buscar en una colonia o municipio nuevo…', 'buscarEnLugar')
     .addItem('Revisar qué panes venden (brownies, galletas…)', 'revisarPanes')
     .addItem('Llenar colonias vacías (desde la dirección)', 'llenarZonasVacias')
+    .addItem('Llenar teléfonos y páginas web (desde Google)', 'llenarTelefonos')
     .addItem('Actualizar pestaña COLONIAS', 'armarColonias')
     .addItem('Agregar calle a nombres genéricos', 'renombrarGenericas')
     .addItem('Quitar cadenas y lugares que no nos interesan', 'limpiarNoInteresa')
@@ -265,7 +266,7 @@ function agregarTienda_(d) {
     'Nombre': d.nombre, 'Ubicación': d.ubicacion || '', 'Visitado': false,
     'Maps': d.maps || (d.lat ? 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng : ''),
     'Notas': d.notas || '', 'Estado': 'Prospecto', 'Lat': d.lat || '', 'Lng': d.lng || '',
-    'Contacto': d.contacto || '', 'Teléfono': d.telefono || '', 'Vende': d.vende || '',
+    'Contacto': d.contacto || '', 'Teléfono': d.telefono || '', 'Vende': d.vende || '', 'Web': d.web || '',
   };
   geocodificarFila_(hoja, enc, agregarFila_(hoja, enc, valores, 'Nombre'));
   return { ok: true };
@@ -405,7 +406,8 @@ function buscarPlaces_(clave, lat, lng, radio, consulta, fn) {
       headers: {
         'X-Goog-Api-Key': clave,
         'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.primaryType,places.types,places.businessStatus,' +
-          'places.servesDessert,places.servesBreakfast,places.servesBrunch,places.servesCoffee,places.editorialSummary,places.reviews,nextPageToken',
+          'places.servesDessert,places.servesBreakfast,places.servesBrunch,places.servesCoffee,places.editorialSummary,places.reviews,' +
+          'places.nationalPhoneNumber,places.websiteUri,nextPageToken',
       },
     });
     const d = JSON.parse(r.getContentText());
@@ -460,6 +462,7 @@ function buscarCerca_(lat, lng, radio, consultas) {
         nombre: nombre, tipo: tipo, ubicacion: (p.formattedAddress || '').replace(/, Jal\.?,? ?(México)?$/, ''),
         lat: p.location.latitude, lng: p.location.longitude, maps: p.googleMapsUri, ofrece: ofrece_(p).join(', '),
         vende: sumarPanes_([], [pan].concat(panesDe_(p))),
+        telefono: p.nationalPhoneNumber || '', web: p.websiteUri || '',
       };
       o.zona = coloniaDeDireccion_(o.ubicacion);
       porId[p.id] = o;
@@ -468,6 +471,50 @@ function buscarCerca_(lat, lng, radio, consultas) {
   });
   salida.forEach(function (o) { o.vende = o.vende.join(', '); });
   return salida;
+}
+
+// Para los lugares que ya están en la hoja sin teléfono: busca cada uno en Google por nombre junto a su
+// ubicación y llena Teléfono y Web. No toca lo que ya escribiste a mano. Si se corta por tiempo, vuelve a correrlo.
+function llenarTelefonos() {
+  const ss = SpreadsheetApp.getActive();
+  const hoja = ss.getSheetByName(HOJA_TIENDAS);
+  let enc = encabezados_(hoja);
+  ['Teléfono', 'Web'].forEach(function (c) {
+    if (enc.indexOf(c) === -1) { hoja.getRange(1, hoja.getLastColumn() + 1).setValue(c).setFontWeight('bold'); enc = encabezados_(hoja); }
+  });
+  const clave = claveGoogle_();
+  const props = PropertiesService.getScriptProperties();
+  const intentados = JSON.parse(props.getProperty('TELEFONOS_BUSCADOS') || '[]');
+  const datos = hoja.getRange(2, 1, Math.max(hoja.getLastRow() - 1, 1), enc.length).getValues();
+  const cN = enc.indexOf('Nombre'), cLat = enc.indexOf('Lat'), cLng = enc.indexOf('Lng'), cT = enc.indexOf('Teléfono'), cW = enc.indexOf('Web');
+  const inicio = Date.now();
+  let llenos = 0, pendientes = 0;
+  datos.forEach(function (f, i) {
+    const nombre = String(f[cN] || '').trim();
+    if (!nombre || f[cLat] === '' || String(f[cT] || '').trim()) return;
+    const k = norm_(nombre) + '|' + Number(f[cLat]).toFixed(4);
+    if (intentados.indexOf(k) !== -1) return;
+    if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
+    const lat = Number(f[cLat]), lng = Number(f[cLng]);
+    // Solo campos de teléfono y web (sin reseñas) para que la consulta salga más barata.
+    const r = UrlFetchApp.fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({ textQuery: nombre.split(' · ')[0], languageCode: 'es', regionCode: 'MX', pageSize: 1,
+        locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: 150 } } }),
+      headers: { 'X-Goog-Api-Key': clave, 'X-Goog-FieldMask': 'places.location,places.nationalPhoneNumber,places.websiteUri' },
+    });
+    const d = JSON.parse(r.getContentText());
+    if (d.error) throw new Error('Google Places: ' + d.error.message);
+    const p = (d.places || [])[0];
+    if (p && p.location && distanciaKm_(lat, lng, p.location.latitude, p.location.longitude) < 0.1) {
+      if (p.nationalPhoneNumber) { hoja.getRange(i + 2, cT + 1).setValue(p.nationalPhoneNumber); llenos++; }
+      if (p.websiteUri && !String(f[cW] || '').trim()) hoja.getRange(i + 2, cW + 1).setValue(p.websiteUri);
+    }
+    intentados.push(k);
+    if (intentados.length % 20 === 0) props.setProperty('TELEFONOS_BUSCADOS', JSON.stringify(intentados));
+  });
+  props.setProperty('TELEFONOS_BUSCADOS', JSON.stringify(intentados));
+  ss.toast(llenos + ' teléfonos llenados' + (pendientes ? '. Faltan ' + pendientes + ' lugares: vuelve a correrlo.' : '. ¡Listo!'), '🥐 Quisito', 15);
 }
 
 // Para los lugares que ya están en la hoja: busca en Google cada pan por zona y marca la columna "Vende".
@@ -553,7 +600,7 @@ function buscarTiendasGoogle() {
     const c = zonas[z];
     buscarCerca_(c.lat / c.n, c.lng / c.n, 1000, faltan).forEach(function (t) {
       agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: z, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-        maps: t.maps, vende: t.vende, prioridad: 'Media', notas: notaGoogle_(t) });
+        maps: t.maps, vende: t.vende, telefono: t.telefono, web: t.web, prioridad: 'Media', notas: notaGoogle_(t) });
       agregadas++;
     });
     faltan.forEach(function (q) { hechas.push(z + '|' + q); });
@@ -580,7 +627,7 @@ function buscarEnLugar() {
     const valores = {
       'Prioridad': 'Media', 'Zona': zona, 'Tipo': t.tipo, 'Nombre': nombreConCalle_(t.nombre, t.ubicacion),
       'Ubicación': t.ubicacion, 'Visitado': false, 'Maps': t.maps, 'Notas': notaGoogle_(t),
-      'Estado': 'Prospecto', 'Lat': t.lat, 'Lng': t.lng, 'Vende': t.vende || '',
+      'Estado': 'Prospecto', 'Lat': t.lat, 'Lng': t.lng, 'Vende': t.vende || '', 'Teléfono': t.telefono || '', 'Web': t.web || '',
     };
     agregarFila_(hoja, enc, valores, 'Nombre');
   });
@@ -616,7 +663,7 @@ function sembrarColonias() {
       const zona = lugar.split(',')[0].trim();
       buscarCerca_(loc.lat, loc.lng, 1200).forEach(function (t) {
         agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: zona, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-          maps: t.maps, vende: t.vende, prioridad: 'Media', notas: notaGoogle_(t) });
+          maps: t.maps, vende: t.vende, telefono: t.telefono, web: t.web, prioridad: 'Media', notas: notaGoogle_(t) });
         agregadas++;
       });
     }
@@ -632,6 +679,7 @@ function reiniciarBusquedaGoogle() {
   PropertiesService.getScriptProperties().deleteProperty('ZONAS_BUSCADAS');
   PropertiesService.getScriptProperties().deleteProperty('COLONIAS_SEMBRADAS');
   PropertiesService.getScriptProperties().deleteProperty('PANES_REVISADOS');
+  PropertiesService.getScriptProperties().deleteProperty('TELEFONOS_BUSCADOS');
 }
 
 function distanciaKm_(a, b, c, d) {

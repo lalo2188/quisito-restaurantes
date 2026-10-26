@@ -169,6 +169,7 @@
       contacto: String(campo(f, 'Contacto', 'Encargado')).trim(),
       telefono: String(campo(f, 'Teléfono', 'Telefono', 'Tel')).trim(),
       vende: String(campo(f, 'Vende')).trim(),
+      web: String(campo(f, 'Web', 'Página', 'Sitio')).trim(),
       notas: String(campo(f, 'Notas')).trim(),
       estadoManual: String(campo(f, 'Estado')).trim(),
       lat: num(campo(f, 'Lat')) || null,
@@ -262,7 +263,7 @@
   function bienvenida() {
     $('#lista-tiendas').innerHTML = '<div class="nota" style="font-size:14px"><b>¡Bienvenido al mapa de Quisito! 🥐</b><br><br>' +
       'Falta conectar la hoja de Google con los prospectos. Crea una hoja con la pestaña <b>Prospectos</b> y estas columnas en la fila 1:' +
-      '<pre class="tsv">Prioridad · Zona · Tipo · Nombre · Ubicación · Visitado · Maps · Notas · Estado · Lat · Lng · Contacto · Teléfono · Vende</pre>' +
+      '<pre class="tsv">Prioridad · Zona · Tipo · Nombre · Ubicación · Visitado · Maps · Notas · Estado · Lat · Lng · Contacto · Teléfono · Vende · Web</pre>' +
       'Compártela como "Cualquier persona con el enlace: lector" y pega su ID en <b>config.js → SHEET_ID</b>. Los pasos completos están en el README.<br><br>' +
       'Mientras tanto puedes usar 🔍 en el mapa para ver qué restaurantes y cafés hay en una colonia.</div>';
     pintarTerritorio();
@@ -567,6 +568,7 @@
       '<div class="meta"><span>🏷️ ' + esc(t.tipo || 'Sin tipo') + ' · Prioridad ' + esc(t.prioridad) + '</span><span>📍 ' + esc(t.ubicacion || 'Sin dirección') + (t.aprox ? ' <i>(ubicación aproximada)</i>' : '') + '</span><span>🗺️ ' + esc(t.zona) + '</span>' +
         (t.contacto ? '<span>👤 ' + esc(t.contacto) + '</span>' : '') +
         (t.telefono ? '<span>📞 <a href="tel:' + esc(t.telefono.replace(/[^\d+]/g, '')) + '">' + esc(t.telefono) + '</a></span>' : '') +
+        (/^https?:\/\//.test(t.web) ? '<span>🌐 <a target="_blank" rel="noopener" href="' + esc(t.web) + '">Su página (menú)</a></span>' : '') +
         (t.notas ? '<span>📝 ' + esc(t.notas) + '</span>' : '') + '</div>' +
       avisoPan(t.vende) +
       '<div class="acciones">' +
@@ -799,7 +801,7 @@
         const r = await enviar({ accion: 'buscar', lat: c.lat, lng: c.lng, radio });
         if (r.ok && Array.isArray(r.tiendas)) {
           fuente = 'Google Maps';
-          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, ofrece: t.ofrece, vende: t.vende, zona: t.zona, tags: { name: t.nombre } })) };
+          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, ofrece: t.ofrece, vende: t.vende, zona: t.zona, telefono: t.telefono, web: t.web, tags: { name: t.nombre } })) };
         } else console.warn('Búsqueda en Google no disponible:', r.error);
       } catch (e) { console.warn('Búsqueda en Google no disponible:', e); }
     }
@@ -821,7 +823,7 @@
         nombre, lat, lng, maps: e.maps || '', rating: e.rating || null, marca: t.brand || '',
         tipo: e.tipo || tipoDesdeOSM(t),
         ofrece: e.type === 'google' ? (e.ofrece || '') : ofreceDesdeOSM(t),
-        vende: e.vende || '',
+        vende: e.vende || '', telefono: e.telefono || '', web: e.web || '',
         zona: e.zona || t['addr:suburb'] || (cercana && cercana[1] < 1.5 ? cercana[0].zona : ''),
         ubicacion: e.ubicacion || [calle, t['addr:suburb'], t['addr:city'] || 'Guadalajara'].filter(Boolean).join(', '),
         repetida: !!(cercana && cercana[1] < 0.04) || st.tiendas.some((x) => norm(x.nombre) === norm(nombre)),
@@ -860,6 +862,8 @@
         (c.zona ? '<span>🗺️ ' + esc(c.zona) + '</span>' : '') +
         (c.ofrece ? '<span>🍰 Sirve: ' + esc(c.ofrece) + '</span>' : '') +
         (c.rating ? '<span>⭐ ' + esc(c.rating) + '</span>' : '') +
+        (c.telefono ? '<span>📞 <a href="tel:' + esc(c.telefono.replace(/[^\d+]/g, '')) + '">' + esc(c.telefono) + '</a></span>' : '') +
+        (/^https?:\/\//.test(c.web) ? '<span>🌐 <a target="_blank" rel="noopener" href="' + esc(c.web) + '">Su página (menú)</a></span>' : '') +
         '<span>📝 Encontrado en ' + esc(st.fuenteNuevas || 'el mapa') + '</span></div>' +
       avisoPan(c.vende) +
       '<div class="acciones">' +
@@ -874,11 +878,11 @@
     $('#nv-lista').onclick = () => abrirNuevas();
     $('#nv-quitar').onclick = () => { st.nuevas.splice(i, 1); pintarNuevas(); cerrarHoja(); };
     $('#nv-una').onclick = async () => {
-      const d = { accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad: 'Media', zona: c.zona, ubicacion: c.ubicacion, lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende,
+      const d = { accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad: 'Media', zona: c.zona, ubicacion: c.ubicacion, lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende, telefono: c.telefono, web: c.web,
         notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : '') };
       if (!CFG.SCRIPT_URL) {
         $('#form-extra').innerHTML = sinScriptHTML([d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',
-          d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', '', d.vende || ''].join('\t'), CFG.HOJA_LUGARES);
+          d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', d.telefono || '', d.vende || '', d.web || ''].join('\t'), CFG.HOJA_LUGARES);
         return;
       }
       const boton = $('#nv-una'); boton.disabled = true; boton.textContent = 'Agregando…';
@@ -923,11 +927,11 @@
     const zona = $('#nv-zona').value.trim(), prioridad = $('#nv-prio').value;
     const filas = elegidas.map((c) => ({
       accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad, zona: zona || c.zona, ubicacion: c.ubicacion,
-      lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : ''),
+      lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende, telefono: c.telefono, web: c.web, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : ''),
     }));
     if (!CFG.SCRIPT_URL) {
       const tsv = filas.map((d) => [d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',
-        d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', '', d.vende || ''].join('\t')).join('\n');
+        d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', d.telefono || '', d.vende || '', d.web || ''].join('\t')).join('\n');
       $('#form-extra').innerHTML = sinScriptHTML(tsv, CFG.HOJA_LUGARES);
       return;
     }
