@@ -274,7 +274,10 @@ function agregarTienda_(d) {
 // Requiere una clave de Google Places guardada en Configuración del proyecto →
 // Propiedades de la secuencia de comandos → GOOGLE_PLACES_KEY (ver README).
 
-var CONSULTAS_GOOGLE = ['cafetería', 'café de especialidad', 'brunch', 'desayunos', 'restaurante', 'bistró'];
+var CONSULTAS_GOOGLE = ['cafetería', 'café de especialidad', 'café y postres', 'brunch', 'desayunos', 'restaurante con postres', 'bistró'];
+// true = solo lugares donde Google dice que sirven postre, desayuno o brunch, más las cafeterías
+// (donde casi siempre hay pan dulce o postre). Así quedan fuera los restaurantes que no venden nada de eso.
+var SOLO_POSTRE_O_PAN = true;
 var TIPOS_GOOGLE = {
   cafe: 'Cafetería', coffee_shop: 'Cafetería', cafeteria: 'Cafetería', tea_house: 'Cafetería',
   brunch_restaurant: 'Brunch / desayunos', breakfast_restaurant: 'Brunch / desayunos',
@@ -297,6 +300,24 @@ function tipoLugar_(tipos) {
   for (let i = 0; i < tipos.length; i++) if (TIPOS_GOOGLE[tipos[i]]) return TIPOS_GOOGLE[tipos[i]];
   // Cualquier otro "*_restaurant" (mexicano, italiano, vegano…) cuenta como restaurante.
   return tipos.some(function (t) { return /_restaurant$/.test(t || ''); }) ? 'Restaurante' : null;
+}
+
+// Lo que Google sabe que sirve el lugar (no todos los lugares tienen estos datos).
+function ofrece_(p) {
+  const o = [];
+  if (p.servesDessert) o.push('postres');
+  if (p.servesBreakfast) o.push('desayunos');
+  if (p.servesBrunch) o.push('brunch');
+  if (p.servesCoffee) o.push('café');
+  return o;
+}
+
+function vendePostreOPan_(p, tipo) {
+  return !!(p.servesDessert || p.servesBreakfast || p.servesBrunch) || ['Cafetería', 'Brunch / desayunos', 'Bistró'].indexOf(tipo) !== -1;
+}
+
+function notaGoogle_(t) {
+  return 'Encontrado en Google Maps' + (t.ofrece ? ' · Sirve: ' + t.ofrece : '');
 }
 
 function buscarCerca_(lat, lng, radio, consultas) {
@@ -323,7 +344,8 @@ function buscarCerca_(lat, lng, radio, consultas) {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload: JSON.stringify(cuerpo),
         headers: {
           'X-Goog-Api-Key': clave,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.primaryType,places.types,places.businessStatus,nextPageToken',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.primaryType,places.types,places.businessStatus,' +
+            'places.servesDessert,places.servesBreakfast,places.servesBrunch,places.servesCoffee,nextPageToken',
         },
       });
       const d = JSON.parse(r.getContentText());
@@ -334,6 +356,8 @@ function buscarCerca_(lat, lng, radio, consultas) {
         const nombre = p.displayName ? p.displayName.text : '';
         const tipo = tipoLugar_([p.primaryType].concat(p.types || []));
         if (!nombre || !tipo || noInteresa_(nombre)) return;
+        const ofrece = ofrece_(p);
+        if (SOLO_POSTRE_O_PAN && !vendePostreOPan_(p, tipo)) return;
         if (distanciaKm_(lat, lng, p.location.latitude, p.location.longitude) * 1000 > radio * 1.25) return;
         const repetida = existentes.some(function (x) {
           if (String(x.Maps || '').indexOf(p.googleMapsUri) === 0) return true;
@@ -344,7 +368,7 @@ function buscarCerca_(lat, lng, radio, consultas) {
         if (repetida) return;
         salida.push({
           nombre: nombre, tipo: tipo, ubicacion: (p.formattedAddress || '').replace(/, Jal\.?,? ?(México)?$/, ''),
-          lat: p.location.latitude, lng: p.location.longitude, maps: p.googleMapsUri,
+          lat: p.location.latitude, lng: p.location.longitude, maps: p.googleMapsUri, ofrece: ofrece.join(', '),
         });
       });
       token = d.nextPageToken;
@@ -381,7 +405,7 @@ function buscarTiendasGoogle() {
     const c = zonas[z];
     buscarCerca_(c.lat / c.n, c.lng / c.n, 1000, faltan).forEach(function (t) {
       agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: z, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-        maps: t.maps, prioridad: 'Media', notas: 'Encontrado en Google Maps' });
+        maps: t.maps, prioridad: 'Media', notas: notaGoogle_(t) });
       agregadas++;
     });
     faltan.forEach(function (q) { hechas.push(z + '|' + q); });
@@ -407,7 +431,7 @@ function buscarEnLugar() {
   nuevas.forEach(function (t) {
     const valores = {
       'Prioridad': 'Media', 'Zona': zona, 'Tipo': t.tipo, 'Nombre': nombreConCalle_(t.nombre, t.ubicacion),
-      'Ubicación': t.ubicacion, 'Visitado': false, 'Maps': t.maps, 'Notas': 'Encontrado en Google Maps',
+      'Ubicación': t.ubicacion, 'Visitado': false, 'Maps': t.maps, 'Notas': notaGoogle_(t),
       'Estado': 'Prospecto', 'Lat': t.lat, 'Lng': t.lng,
     };
     hoja.appendRow(enc.map(function (c) { return c in valores ? valores[c] : ''; }));
@@ -444,7 +468,7 @@ function sembrarColonias() {
       const zona = lugar.split(',')[0].trim();
       buscarCerca_(loc.lat, loc.lng, 1200).forEach(function (t) {
         agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: zona, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-          maps: t.maps, prioridad: 'Media', notas: 'Encontrado en Google Maps' });
+          maps: t.maps, prioridad: 'Media', notas: notaGoogle_(t) });
         agregadas++;
       });
     }

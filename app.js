@@ -746,6 +746,22 @@
     return TIPOS_OSM[t.amenity] || 'Restaurante';
   }
 
+  // En OpenStreetMap lo que sirve un lugar viene (cuando viene) en la etiqueta "cuisine".
+  function ofreceDesdeOSM(t) {
+    const cocina = String(t.cuisine || '');
+    const o = [];
+    if (/dessert|cake|crepe|waffle|pastry|pancake|churro/.test(cocina)) o.push('postres');
+    if (/breakfast/.test(cocina)) o.push('desayunos');
+    if (/brunch/.test(cocina)) o.push('brunch');
+    if (/coffee|cafe/.test(cocina) || t.amenity === 'cafe') o.push('café');
+    return o.join(', ');
+  }
+
+  // Igual que en el Apps Script: postre, desayuno o brunch, o que sea cafetería / bistró.
+  function vendePostreOPan(c) {
+    return /postres|desayunos|brunch/.test(c.ofrece || '') || ['Cafetería', 'Brunch / desayunos', 'Bistró'].includes(c.tipo);
+  }
+
   async function consultarOSM(q) {
     for (const url of SERVIDORES_OSM) {
       try {
@@ -771,7 +787,7 @@
         const r = await enviar({ accion: 'buscar', lat: c.lat, lng: c.lng, radio });
         if (r.ok && Array.isArray(r.tiendas)) {
           fuente = 'Google Maps';
-          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, tags: { name: t.nombre } })) };
+          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, ofrece: t.ofrece, tags: { name: t.nombre } })) };
         } else console.warn('Búsqueda en Google no disponible:', r.error);
       } catch (e) { console.warn('Búsqueda en Google no disponible:', e); }
     }
@@ -792,12 +808,14 @@
       return {
         nombre, lat, lng, maps: e.maps || '', rating: e.rating || null, marca: t.brand || '',
         tipo: e.tipo || tipoDesdeOSM(t),
+        ofrece: e.type === 'google' ? (e.ofrece || '') : ofreceDesdeOSM(t),
         zona: t['addr:suburb'] || (cercana && cercana[1] < 1.5 ? cercana[0].zona : ''),
         ubicacion: e.ubicacion || [calle, t['addr:suburb'], t['addr:city'] || 'Guadalajara'].filter(Boolean).join(', '),
         repetida: !!(cercana && cercana[1] < 0.04) || st.tiendas.some((x) => norm(x.nombre) === norm(nombre)),
       };
     }).filter((c) => {
       if (!c.nombre || c.lat == null || c.repetida || CADENAS.test(c.nombre + ' ' + c.marca) || NO_INTERESA.test(c.nombre)) return false;
+      if (CFG.SOLO_POSTRE_O_PAN && !vendePostreOPan(c)) return false;
       const k = norm(c.nombre) + '|' + c.lat.toFixed(4);
       if (vistos.has(k)) return false;
       vistos.add(k); return true;
@@ -821,14 +839,14 @@
     const lista = st.nuevas || [];
     abrirHoja(
       '<div class="top"><h3 class="disp">🔍 ' + lista.length + ' lugares nuevos aquí</h3><button class="cerrar" data-cerrar>✕</button></div>' +
-      '<div class="nota">Restaurantes, cafeterías, brunch y bistrós. Vienen de <b>' + esc(st.fuenteNuevas || 'OpenStreetMap') + '</b>' + (st.fuenteNuevas === 'Google Maps' ? '' : ': no están todos y algunos pueden ya no existir') + '. Ya quité los que tienes en tu lista, las cadenas (Starbucks, Vips, Toks…) y lo que no compra pan ni postre (taquerías, mariscos, pizzerías, panaderías…).</div>' +
+      '<div class="nota">Restaurantes, cafeterías, brunch y bistrós. Vienen de <b>' + esc(st.fuenteNuevas || 'OpenStreetMap') + '</b>' + (st.fuenteNuevas === 'Google Maps' ? '' : ': no están todos y algunos pueden ya no existir') + '. Ya quité los que tienes en tu lista, las cadenas (Starbucks, Vips, Toks…) y lo que no compra pan ni postre (taquerías, mariscos, pizzerías, panaderías…).' + (CFG.SOLO_POSTRE_O_PAN ? ' Solo dejé cafeterías y restaurantes que sirven postre, desayuno o brunch' + (st.fuenteNuevas === 'Google Maps' ? '.' : ' (OpenStreetMap casi no trae ese dato, así que de ahí salen sobre todo cafés).') : '') + '</div>' +
       '<div class="grid2"><div><label>Zona (opcional, para todas)</label><input id="nv-zona" placeholder="Usar la de cada tienda"></div>' +
         '<div><label>Prioridad</label><select id="nv-prio"><option>Alta</option><option selected>Media</option><option>Baja</option></select></div></div>' +
       '<div class="fila-btns"><button class="btn sec" type="button" id="nv-todas">Marcar todas</button><button class="btn sec" type="button" id="nv-ninguna">Ninguna</button></div>' +
       '<div class="lista">' + lista.map((c, i) =>
         '<label class="item" style="grid-template-columns:auto 1fr;cursor:pointer;color:var(--ink);font-size:inherit;font-weight:inherit;margin:0' + (i === foco ? ';border-color:var(--rojo)' : '') + '">' +
         '<input type="checkbox" data-nueva="' + i + '"' + (foco == null || i === foco ? ' checked' : '') + ' style="width:auto">' +
-        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
+        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.ofrece ? ' · 🍰 ' + esc(c.ofrece) : '') + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
       '<div id="form-extra"></div>' +
       '<button class="btn" style="width:100%;margin-top:12px" id="nv-agregar">Agregar seleccionadas a mi lista</button>'
     );
@@ -843,7 +861,7 @@
     const zona = $('#nv-zona').value.trim(), prioridad = $('#nv-prio').value;
     const filas = elegidas.map((c) => ({
       accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad, zona: zona || c.zona, ubicacion: c.ubicacion,
-      lat: c.lat, lng: c.lng, maps: c.maps, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.rating ? ' · ⭐ ' + c.rating : ''),
+      lat: c.lat, lng: c.lng, maps: c.maps, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : ''),
     }));
     if (!CFG.SCRIPT_URL) {
       const tsv = filas.map((d) => [d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',

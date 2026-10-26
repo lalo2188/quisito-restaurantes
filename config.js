@@ -29,6 +29,9 @@ window.QUISITO_CONFIG = {
   PRECIO_DEFAULT: '',
   // Radio (metros) del territorio que "conquista" cada cliente.
   RADIO_TERRITORIO: 600,
+  // true = la búsqueda 🔍 solo deja cafeterías y restaurantes que sirven postre, desayuno o brunch.
+  // (En la hoja se cambia aparte, en Code.gs → SOLO_POSTRE_O_PAN.)
+  SOLO_POSTRE_O_PAN: true,
   // Centro inicial del mapa (Guadalajara).
   CENTRO: [20.6736, -103.3700],
 };
