@@ -11,7 +11,7 @@ window.QUISITO_CONFIG = {
   // URL del Web App de Apps Script (ver apps-script/Code.gs y README.md).
   // Mientras esté vacío, el mapa funciona en modo lectura y los pedidos
   // se capturan directo en la hoja.
-  SCRIPT_URL: '',
+  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx_TuWmJCzHx8U_i_fmEn9wWSNpX7DsHsgXVD2ktPqCeykUrxta9F1HrhfmfWYiAX0/exec',
 
   // Productos que ofrecemos. La "columna" debe existir igual en la pestaña Pedidos.
   PRODUCTOS: [
