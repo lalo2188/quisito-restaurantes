@@ -33,7 +33,6 @@ function configurar() {
     tiendas = ss.insertSheet(HOJA_TIENDAS, 0);
     tiendas.getRange(1, 1, 1, COLUMNAS_BASE.length).setValues([COLUMNAS_BASE]).setFontWeight('bold');
     tiendas.setFrozenRows(1);
-    tiendas.getRange('F2:F').insertCheckboxes();
   }
   const enc = encabezados_(tiendas).filter(String);
   COLUMNAS_EXTRA.forEach(function (c) {
