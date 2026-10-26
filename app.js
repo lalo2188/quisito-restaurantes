@@ -168,6 +168,7 @@
       maps: String(campo(f, 'Maps')).trim(),
       contacto: String(campo(f, 'Contacto', 'Encargado')).trim(),
       telefono: String(campo(f, 'Teléfono', 'Telefono', 'Tel')).trim(),
+      vende: String(campo(f, 'Vende')).trim(),
       notas: String(campo(f, 'Notas')).trim(),
       estadoManual: String(campo(f, 'Estado')).trim(),
       lat: num(campo(f, 'Lat')) || null,
@@ -261,7 +262,7 @@
   function bienvenida() {
     $('#lista-tiendas').innerHTML = '<div class="nota" style="font-size:14px"><b>¡Bienvenido al mapa de Quisito! 🥐</b><br><br>' +
       'Falta conectar la hoja de Google con los prospectos. Crea una hoja con la pestaña <b>Prospectos</b> y estas columnas en la fila 1:' +
-      '<pre class="tsv">Prioridad · Zona · Tipo · Nombre · Ubicación · Visitado · Maps · Notas · Estado · Lat · Lng · Contacto · Teléfono</pre>' +
+      '<pre class="tsv">Prioridad · Zona · Tipo · Nombre · Ubicación · Visitado · Maps · Notas · Estado · Lat · Lng · Contacto · Teléfono · Vende</pre>' +
       'Compártela como "Cualquier persona con el enlace: lector" y pega su ID en <b>config.js → SHEET_ID</b>. Los pasos completos están en el README.<br><br>' +
       'Mientras tanto puedes usar 🔍 en el mapa para ver qué restaurantes y cafés hay en una colonia.</div>';
     pintarTerritorio();
@@ -303,12 +304,13 @@
   }
 
   function visibles() {
-    const texto = norm($('#f-texto').value), zona = $('#f-zona').value, prio = norm($('#f-prioridad').value), tipo = $('#f-tipo').value;
+    const texto = norm($('#f-texto').value), zona = $('#f-zona').value, prio = norm($('#f-prioridad').value), tipo = $('#f-tipo').value, pan = $('#f-pan').value;
     return st.tiendas.filter((t) => st.filtroEstados.has(t.estado)
       && (!zona || zonaBase(t.zona) === zona)
       && (!tipo || t.tipo === tipo)
+      && (!pan || (pan === '*' ? !!t.vende : norm(t.vende).split(/\s*,\s*/).includes(norm(pan))))
       && (!prio || norm(t.prioridad) === prio)
-      && (!texto || norm(t.nombre + ' ' + t.zona + ' ' + t.ubicacion + ' ' + t.tipo + ' ' + t.notas + ' ' + t.contacto).includes(texto)));
+      && (!texto || norm(t.nombre + ' ' + t.zona + ' ' + t.ubicacion + ' ' + t.tipo + ' ' + t.notas + ' ' + t.contacto + ' ' + t.vende).includes(texto)));
   }
 
   function pintarMapa() {
@@ -350,6 +352,10 @@
     const selT = $('#f-tipo'), actualT = selT.value;
     const tipos = [...new Set(st.tiendas.map((t) => t.tipo).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
     selT.innerHTML = '<option value="">Todo tipo</option>' + tipos.map((z) => '<option' + (z === actualT ? ' selected' : '') + '>' + esc(z) + '</option>').join('');
+    const selP = $('#f-pan'), actualP = selP.value;
+    const conPan = (x) => st.tiendas.filter((t) => x === '*' ? t.vende : norm(t.vende).split(/\s*,\s*/).includes(norm(x))).length;
+    selP.innerHTML = '<option value="">¿Qué pan venden?</option>' +
+      ['*'].concat(CFG.PANES || []).map((x) => '<option value="' + esc(x) + '"' + (x === actualP ? ' selected' : '') + '>' + (x === '*' ? '🥐 Venden alguno' : esc(x.charAt(0).toUpperCase() + x.slice(1))) + ' · ' + conPan(x) + '</option>').join('');
   }
 
   function textoEstado(t) {
@@ -369,7 +375,7 @@
     $('#lista-tiendas').innerHTML = lista.length ? lista.map((t) =>
       '<button class="item" data-tienda="' + t.id + '">' +
         '<span class="punto" style="background:' + ESTADOS[t.estado].color + ';width:12px;height:12px"></span>' +
-        '<span><span class="n">' + esc(t.nombre) + '</span><br><span class="m">' + esc(t.tipo) + ' · ' + esc(zonaBase(t.zona)) + ' · ' + esc(t.prioridad) + (t.lat ? '' : ' · <b>sin ubicación</b>') + '</span></span>' +
+        '<span><span class="n">' + esc(t.nombre) + '</span><br><span class="m">' + esc(t.tipo) + ' · ' + esc(zonaBase(t.zona)) + ' · ' + esc(t.prioridad) + (t.lat ? '' : ' · <b>sin ubicación</b>') + (t.vende ? '<br><span class="vende">🥐 ' + esc(t.vende) + '</span>' : '') + '</span></span>' +
         '<span class="badge" style="background:' + ESTADOS[t.estado].color + '">' + esc(textoEstado(t)) + '</span>' +
       '</button>').join('') : '<div class="vacio">Ningún lugar con esos filtros.</div>';
   }
@@ -540,6 +546,11 @@
     return d.length === 10 ? '52' + d : d;
   }
 
+  // Aviso de que en su menú (según Google: búsquedas, descripción y reseñas) aparecen panes como los nuestros.
+  function avisoPan(vende) {
+    return vende ? '<div class="aviso-pan">⚠️ <b>En su menú aparece: ' + esc(vende) + '.</b> Buen momento para ofrecerles los de Quisito (o ver quién se los surte).</div>' : '';
+  }
+
   function abrirTienda(id) {
     const t = tiendaPorId(id); if (!t) return;
     if (t.lat) mapa.flyTo([t.lat, t.lng], Math.max(mapa.getZoom(), 15), { duration: .6 });
@@ -557,6 +568,7 @@
         (t.contacto ? '<span>👤 ' + esc(t.contacto) + '</span>' : '') +
         (t.telefono ? '<span>📞 <a href="tel:' + esc(t.telefono.replace(/[^\d+]/g, '')) + '">' + esc(t.telefono) + '</a></span>' : '') +
         (t.notas ? '<span>📝 ' + esc(t.notas) + '</span>' : '') + '</div>' +
+      avisoPan(t.vende) +
       '<div class="acciones">' +
         '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destino) + '">🧭 Cómo llegar</a>' +
         '<button class="btn sec" data-ruta-toggle="' + t.id + '">' + (enRuta ? '✓ En la ruta' : '➕ Agregar a ruta') + '</button>' +
@@ -787,7 +799,7 @@
         const r = await enviar({ accion: 'buscar', lat: c.lat, lng: c.lng, radio });
         if (r.ok && Array.isArray(r.tiendas)) {
           fuente = 'Google Maps';
-          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, ofrece: t.ofrece, tags: { name: t.nombre } })) };
+          datos = { elements: r.tiendas.map((t, i) => ({ type: 'google', id: i, lat: t.lat, lon: t.lng, maps: t.maps, tipo: t.tipo, ubicacion: t.ubicacion, rating: t.rating, ofrece: t.ofrece, vende: t.vende, zona: t.zona, tags: { name: t.nombre } })) };
         } else console.warn('Búsqueda en Google no disponible:', r.error);
       } catch (e) { console.warn('Búsqueda en Google no disponible:', e); }
     }
@@ -809,7 +821,8 @@
         nombre, lat, lng, maps: e.maps || '', rating: e.rating || null, marca: t.brand || '',
         tipo: e.tipo || tipoDesdeOSM(t),
         ofrece: e.type === 'google' ? (e.ofrece || '') : ofreceDesdeOSM(t),
-        zona: t['addr:suburb'] || (cercana && cercana[1] < 1.5 ? cercana[0].zona : ''),
+        vende: e.vende || '',
+        zona: e.zona || t['addr:suburb'] || (cercana && cercana[1] < 1.5 ? cercana[0].zona : ''),
         ubicacion: e.ubicacion || [calle, t['addr:suburb'], t['addr:city'] || 'Guadalajara'].filter(Boolean).join(', '),
         repetida: !!(cercana && cercana[1] < 0.04) || st.tiendas.some((x) => norm(x.nombre) === norm(nombre)),
       };
@@ -848,6 +861,7 @@
         (c.ofrece ? '<span>🍰 Sirve: ' + esc(c.ofrece) + '</span>' : '') +
         (c.rating ? '<span>⭐ ' + esc(c.rating) + '</span>' : '') +
         '<span>📝 Encontrado en ' + esc(st.fuenteNuevas || 'el mapa') + '</span></div>' +
+      avisoPan(c.vende) +
       '<div class="acciones">' +
         '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destino) + '">🧭 Cómo llegar</a>' +
         '<a class="btn sec" target="_blank" rel="noopener" href="' + esc(c.maps || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.nombre + ' ' + c.ubicacion)) + '">🔎 Ver en Maps</a>' +
@@ -860,11 +874,11 @@
     $('#nv-lista').onclick = () => abrirNuevas();
     $('#nv-quitar').onclick = () => { st.nuevas.splice(i, 1); pintarNuevas(); cerrarHoja(); };
     $('#nv-una').onclick = async () => {
-      const d = { accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad: 'Media', zona: c.zona, ubicacion: c.ubicacion, lat: c.lat, lng: c.lng, maps: c.maps,
+      const d = { accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad: 'Media', zona: c.zona, ubicacion: c.ubicacion, lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende,
         notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : '') };
       if (!CFG.SCRIPT_URL) {
         $('#form-extra').innerHTML = sinScriptHTML([d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',
-          d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', ''].join('\t'), CFG.HOJA_LUGARES);
+          d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', '', d.vende || ''].join('\t'), CFG.HOJA_LUGARES);
         return;
       }
       const boton = $('#nv-una'); boton.disabled = true; boton.textContent = 'Agregando…';
@@ -894,7 +908,7 @@
       '<div class="lista">' + lista.map((c, i) =>
         '<label class="item" style="grid-template-columns:auto 1fr;cursor:pointer;color:var(--ink);font-size:inherit;font-weight:inherit;margin:0' + (i === foco ? ';border-color:var(--rojo)' : '') + '">' +
         '<input type="checkbox" data-nueva="' + i + '"' + (foco == null || i === foco ? ' checked' : '') + ' style="width:auto">' +
-        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.ofrece ? ' · 🍰 ' + esc(c.ofrece) : '') + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
+        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.ofrece ? ' · 🍰 ' + esc(c.ofrece) : '') + (c.vende ? ' · 🥐 ' + esc(c.vende) : '') + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
       '<div id="form-extra"></div>' +
       '<button class="btn" style="width:100%;margin-top:12px" id="nv-agregar">Agregar seleccionadas a mi lista</button>'
     );
@@ -909,11 +923,11 @@
     const zona = $('#nv-zona').value.trim(), prioridad = $('#nv-prio').value;
     const filas = elegidas.map((c) => ({
       accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad, zona: zona || c.zona, ubicacion: c.ubicacion,
-      lat: c.lat, lng: c.lng, maps: c.maps, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : ''),
+      lat: c.lat, lng: c.lng, maps: c.maps, vende: c.vende, notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : ''),
     }));
     if (!CFG.SCRIPT_URL) {
       const tsv = filas.map((d) => [d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',
-        d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', ''].join('\t')).join('\n');
+        d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', '', d.vende || ''].join('\t')).join('\n');
       $('#form-extra').innerHTML = sinScriptHTML(tsv, CFG.HOJA_LUGARES);
       return;
     }
@@ -959,7 +973,7 @@
     if (st.filtroEstados.has(k)) st.filtroEstados.delete(k); else st.filtroEstados.add(k);
     pintarLeyenda(); pintarMapa(); pintarLista();
   });
-  ['#f-texto', '#f-zona', '#f-prioridad', '#f-tipo'].forEach((s) => $(s).addEventListener('input', () => { pintarMapa(); pintarLista(); }));
+  ['#f-texto', '#f-zona', '#f-prioridad', '#f-tipo', '#f-pan'].forEach((s) => $(s).addEventListener('input', () => { pintarMapa(); pintarLista(); }));
   $('#f-zona').addEventListener('change', () => { encuadrar(); });
 
   document.addEventListener('click', (e) => {

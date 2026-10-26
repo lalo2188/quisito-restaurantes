@@ -15,7 +15,7 @@ var PIN = '';
 var HOJA_TIENDAS = 'Prospectos';
 var HOJA_ENTREGAS = 'Pedidos';
 var COLUMNAS_BASE = ['Prioridad', 'Zona', 'Tipo', 'Nombre', 'Ubicación', 'Visitado', 'Maps', 'Notas'];
-var COLUMNAS_EXTRA = ['Estado', 'Lat', 'Lng', 'Contacto', 'Teléfono'];
+var COLUMNAS_EXTRA = ['Estado', 'Lat', 'Lng', 'Contacto', 'Teléfono', 'Vende'];
 // Los productos deben coincidir con PRODUCTOS de config.js (columna = nombre de la columna aquí).
 var PRODUCTOS = ['Quisito', 'Panes', 'Postres'];
 var COLUMNAS_ENTREGAS = ['Fecha', 'Lugar'].concat(PRODUCTOS, ['Precio', 'Seguimiento', 'Tipo', 'Notas']);
@@ -72,6 +72,8 @@ function onOpen() {
     .addItem('Llenar con las colonias top de GDL y Zapopan', 'sembrarColonias')
     .addItem('Buscar restaurantes y cafés en Google (por zona)', 'buscarTiendasGoogle')
     .addItem('Buscar en una colonia o municipio nuevo…', 'buscarEnLugar')
+    .addItem('Revisar qué panes venden (brownies, galletas…)', 'revisarPanes')
+    .addItem('Llenar colonias vacías (desde la dirección)', 'llenarZonasVacias')
     .addItem('Actualizar pestaña COLONIAS', 'armarColonias')
     .addItem('Agregar calle a nombres genéricos', 'renombrarGenericas')
     .addItem('Quitar cadenas y lugares que no nos interesan', 'limpiarNoInteresa')
@@ -218,7 +220,7 @@ function registrarEntrega_(d) {
   };
   // El mapa manda cada producto con su id en minúsculas (quisito, panes, postres).
   PRODUCTOS.forEach(function (p) { valores[p] = num_(d[norm_(p)]); });
-  hoja.appendRow(enc.map(function (c) { return c in valores ? valores[c] : ''; }));
+  agregarFila_(hoja, enc, valores, 'Lugar');
   // Una degustación no le quita lo "Cliente" a quien ya compra.
   if (!degustacion) cambiarEstado_(d.tienda, 'Cliente');
   else if (norm_(estadoDe_(d.tienda)) !== 'cliente') cambiarEstado_(d.tienda, 'Degustación');
@@ -259,15 +261,59 @@ function agregarTienda_(d) {
   });
   if (ya) return { ok: true, yaExistia: true };
   const valores = {
-    'Prioridad': d.prioridad || 'Media', 'Zona': d.zona || '', 'Tipo': d.tipo || 'Cafetería',
+    'Prioridad': d.prioridad || 'Media', 'Zona': d.zona || coloniaDeDireccion_(d.ubicacion), 'Tipo': d.tipo || 'Cafetería',
     'Nombre': d.nombre, 'Ubicación': d.ubicacion || '', 'Visitado': false,
     'Maps': d.maps || (d.lat ? 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng : ''),
     'Notas': d.notas || '', 'Estado': 'Prospecto', 'Lat': d.lat || '', 'Lng': d.lng || '',
-    'Contacto': d.contacto || '', 'Teléfono': d.telefono || '',
+    'Contacto': d.contacto || '', 'Teléfono': d.telefono || '', 'Vende': d.vende || '',
   };
-  hoja.appendRow(enc.map(function (c) { return c in valores ? valores[c] : ''; }));
-  geocodificarFila_(hoja, enc, hoja.getLastRow());
+  geocodificarFila_(hoja, enc, agregarFila_(hoja, enc, valores, 'Nombre'));
   return { ok: true };
+}
+
+// appendRow escribe después de la última fila con *cualquier* cosa (una casilla vacía de "Visitado"
+// cuenta), y por eso los lugares llegaron a empezar en la fila 701. Aquí buscamos la última fila
+// que sí tiene dato en la columna clave y escribimos justo debajo.
+function agregarFila_(hoja, enc, valores, clave) {
+  const c = enc.indexOf(clave) + 1;
+  let fila = 2;
+  if (c && hoja.getLastRow() > 1) {
+    const col = hoja.getRange(2, c, hoja.getLastRow() - 1, 1).getValues();
+    for (let i = col.length - 1; i >= 0; i--) {
+      if (String(col[i][0]).trim() !== '') { fila = i + 3; break; }
+    }
+  }
+  if (fila > hoja.getMaxRows()) hoja.insertRowsAfter(hoja.getMaxRows(), fila - hoja.getMaxRows());
+  hoja.getRange(fila, 1, 1, enc.length).setValues([enc.map(function (h) { return h && h in valores ? valores[h] : ''; })]);
+  return fila;
+}
+
+// "Av. Alcalde 565, Centro Barranquitas, 44280 Guadalajara" → "Centro Barranquitas"
+function coloniaDeDireccion_(ubicacion) {
+  const partes = String(ubicacion || '').split(',').map(function (x) { return x.trim(); });
+  let i = -1;
+  partes.forEach(function (x, j) { if (/^\d{5}\b/.test(x)) i = j; });
+  const colonia = i > 0 ? partes[i - 1] : '';
+  return /\d/.test(colonia) ? '' : colonia;
+}
+
+function llenarZonasVacias() {
+  const ss = SpreadsheetApp.getActive();
+  const hoja = ss.getSheetByName(HOJA_TIENDAS);
+  const enc = encabezados_(hoja);
+  const cZ = enc.indexOf('Zona'), cU = enc.indexOf('Ubicación');
+  const n = hoja.getLastRow() - 1;
+  if (cZ === -1 || cU === -1 || n < 1) return;
+  const zonas = hoja.getRange(2, cZ + 1, n, 1).getValues();
+  const ubis = hoja.getRange(2, cU + 1, n, 1).getValues();
+  let cambios = 0;
+  hoja.getRange(2, cZ + 1, n, 1).setValues(zonas.map(function (z, i) {
+    if (String(z[0]).trim() || !ubis[i][0]) return z;
+    const col = coloniaDeDireccion_(ubis[i][0]);
+    if (col) cambios++;
+    return [col];
+  }));
+  ss.toast(cambios + ' lugares ya tienen colonia.', '🥐 Quisito', 8);
 }
 
 // ---------- Buscar restaurantes y cafés en Google Maps (Places API) ----------
@@ -320,62 +366,162 @@ function notaGoogle_(t) {
   return 'Encontrado en Google Maps' + (t.ofrece ? ' · Sirve: ' + t.ofrece : '');
 }
 
-function buscarCerca_(lat, lng, radio, consultas) {
+// Panes que nos interesa saber si ya venden (para ofrecerles los nuestros).
+// "consulta" es lo que se le pregunta a Google en la zona; "re" se busca en el nombre, la descripción y las reseñas.
+var PANES = [
+  { id: 'brownies', consulta: 'brownies', re: /brownie/i },
+  { id: 'cuernitos', consulta: 'cuernitos croissant', re: /cuernit|croissant|cruas[aá]n/i },
+  { id: 'roles', consulta: 'roles de canela', re: /\broles?\b|cinnamon ?roll/i },
+  { id: 'crumble cookies', consulta: 'crumble cookies', re: /crumbl/i },
+  { id: 'galletas', consulta: 'galletas', re: /galleta|cookie/i },
+];
+var BUSCAR_PANES = true;
+var CONSULTAS_TODAS = CONSULTAS_GOOGLE.concat(BUSCAR_PANES ? PANES.map(function (x) { return x.consulta; }) : []);
+
+function claveGoogle_() {
   const clave = PropertiesService.getScriptProperties().getProperty('GOOGLE_PLACES_KEY');
   if (!clave) throw new Error('Falta la clave GOOGLE_PLACES_KEY en las propiedades del script');
-  const existentes = filas_(SpreadsheetApp.getActive().getSheetByName(HOJA_TIENDAS));
-  const vistos = {};
-  const salida = [];
+  return clave;
+}
+
+// Recorre hasta 3 páginas de resultados de Google para una consulta dentro de un cuadro alrededor del punto.
+function buscarPlaces_(clave, lat, lng, radio, consulta, fn) {
   const dLat = radio / 111320, dLng = radio / (111320 * Math.cos(lat * Math.PI / 180));
-  (consultas || CONSULTAS_GOOGLE).forEach(function (consulta) {
-    let token = '';
-    for (let pagina = 0; pagina < 3; pagina++) {
-      const cuerpo = {
-        textQuery: consulta, languageCode: 'es', regionCode: 'MX', pageSize: 20,
-        // Restringido al cuadro de búsqueda: con solo "bias" Google prefiere tiendas de Guadalajara
-        // y en pueblos como Tala no quedaba ninguna después de filtrar por distancia.
-        locationRestriction: { rectangle: {
-          low: { latitude: lat - dLat, longitude: lng - dLng },
-          high: { latitude: lat + dLat, longitude: lng + dLng },
-        } },
+  let token = '';
+  for (let pagina = 0; pagina < 3; pagina++) {
+    const cuerpo = {
+      textQuery: consulta, languageCode: 'es', regionCode: 'MX', pageSize: 20,
+      // Restringido al cuadro de búsqueda: con solo "bias" Google prefiere lugares lejanos.
+      locationRestriction: { rectangle: {
+        low: { latitude: lat - dLat, longitude: lng - dLng },
+        high: { latitude: lat + dLat, longitude: lng + dLng },
+      } },
+    };
+    if (token) cuerpo.pageToken = token;
+    const r = UrlFetchApp.fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload: JSON.stringify(cuerpo),
+      headers: {
+        'X-Goog-Api-Key': clave,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.primaryType,places.types,places.businessStatus,' +
+          'places.servesDessert,places.servesBreakfast,places.servesBrunch,places.servesCoffee,places.editorialSummary,places.reviews,nextPageToken',
+      },
+    });
+    const d = JSON.parse(r.getContentText());
+    if (d.error) throw new Error('Google Places: ' + d.error.message);
+    (d.places || []).forEach(function (p) {
+      if (p.businessStatus === 'OPERATIONAL' && p.location) fn(p);
+    });
+    token = d.nextPageToken;
+    if (!token) break;
+  }
+}
+
+// Panes de la lista que aparecen en el nombre, la descripción o las reseñas del lugar.
+function panesDe_(p) {
+  const texto = [p.displayName ? p.displayName.text : '', p.editorialSummary ? p.editorialSummary.text : '']
+    .concat((p.reviews || []).map(function (r) { return (r.text && r.text.text) || (r.originalText && r.originalText.text) || ''; }))
+    .join(' \n ');
+  return PANES.filter(function (x) { return x.re.test(texto); }).map(function (x) { return x.id; });
+}
+
+function sumarPanes_(lista, nuevos) {
+  nuevos.forEach(function (x) { if (x && lista.indexOf(x) === -1) lista.push(x); });
+  return lista;
+}
+
+function buscarCerca_(lat, lng, radio, consultas) {
+  const clave = claveGoogle_();
+  const existentes = filas_(SpreadsheetApp.getActive().getSheetByName(HOJA_TIENDAS));
+  const panPorConsulta = {};
+  PANES.forEach(function (x) { panPorConsulta[x.consulta] = x.id; });
+  const descartados = {}, porId = {}, salida = [];
+  (consultas || CONSULTAS_TODAS).forEach(function (consulta) {
+    const pan = panPorConsulta[consulta];
+    buscarPlaces_(clave, lat, lng, radio, consulta, function (p) {
+      // Si Google lo devuelve al buscar "brownies", lo relaciona con brownies (por su menú o reseñas).
+      if (porId[p.id]) { sumarPanes_(porId[p.id].vende, [pan].concat(panesDe_(p))); return; }
+      if (descartados[p.id]) return;
+      descartados[p.id] = true;
+      const nombre = p.displayName ? p.displayName.text : '';
+      const tipo = tipoLugar_([p.primaryType].concat(p.types || []));
+      if (!nombre || !tipo || noInteresa_(nombre)) return;
+      if (SOLO_POSTRE_O_PAN && !vendePostreOPan_(p, tipo) && !pan) return;
+      if (distanciaKm_(lat, lng, p.location.latitude, p.location.longitude) * 1000 > radio * 1.25) return;
+      const repetida = existentes.some(function (x) {
+        if (String(x.Maps || '').indexOf(p.googleMapsUri) === 0) return true;
+        if (x.Lat === '' || x.Lng === '') return false;
+        const metros = distanciaKm_(Number(x.Lat), Number(x.Lng), p.location.latitude, p.location.longitude) * 1000;
+        return metros < 15 || (metros < 60 && norm_(x.Nombre).slice(0, 6) === norm_(nombre).slice(0, 6));
+      });
+      if (repetida) return;
+      const o = {
+        nombre: nombre, tipo: tipo, ubicacion: (p.formattedAddress || '').replace(/, Jal\.?,? ?(México)?$/, ''),
+        lat: p.location.latitude, lng: p.location.longitude, maps: p.googleMapsUri, ofrece: ofrece_(p).join(', '),
+        vende: sumarPanes_([], [pan].concat(panesDe_(p))),
       };
-      if (token) cuerpo.pageToken = token;
-      const r = UrlFetchApp.fetch('https://places.googleapis.com/v1/places:searchText', {
-        method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload: JSON.stringify(cuerpo),
-        headers: {
-          'X-Goog-Api-Key': clave,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.primaryType,places.types,places.businessStatus,' +
-            'places.servesDessert,places.servesBreakfast,places.servesBrunch,places.servesCoffee,nextPageToken',
-        },
-      });
-      const d = JSON.parse(r.getContentText());
-      if (d.error) throw new Error('Google Places: ' + d.error.message);
-      (d.places || []).forEach(function (p) {
-        if (vistos[p.id] || p.businessStatus !== 'OPERATIONAL' || !p.location) return;
-        vistos[p.id] = true;
-        const nombre = p.displayName ? p.displayName.text : '';
-        const tipo = tipoLugar_([p.primaryType].concat(p.types || []));
-        if (!nombre || !tipo || noInteresa_(nombre)) return;
-        const ofrece = ofrece_(p);
-        if (SOLO_POSTRE_O_PAN && !vendePostreOPan_(p, tipo)) return;
-        if (distanciaKm_(lat, lng, p.location.latitude, p.location.longitude) * 1000 > radio * 1.25) return;
-        const repetida = existentes.some(function (x) {
-          if (String(x.Maps || '').indexOf(p.googleMapsUri) === 0) return true;
-          if (x.Lat === '' || x.Lng === '') return false;
-          const metros = distanciaKm_(Number(x.Lat), Number(x.Lng), p.location.latitude, p.location.longitude) * 1000;
-          return metros < 15 || (metros < 60 && norm_(x.Nombre).slice(0, 6) === norm_(nombre).slice(0, 6));
-        });
-        if (repetida) return;
-        salida.push({
-          nombre: nombre, tipo: tipo, ubicacion: (p.formattedAddress || '').replace(/, Jal\.?,? ?(México)?$/, ''),
-          lat: p.location.latitude, lng: p.location.longitude, maps: p.googleMapsUri, ofrece: ofrece.join(', '),
-        });
-      });
-      token = d.nextPageToken;
-      if (!token) break;
-    }
+      o.zona = coloniaDeDireccion_(o.ubicacion);
+      porId[p.id] = o;
+      salida.push(o);
+    });
   });
+  salida.forEach(function (o) { o.vende = o.vende.join(', '); });
   return salida;
+}
+
+// Para los lugares que ya están en la hoja: busca en Google cada pan por zona y marca la columna "Vende".
+// Agrupa los lugares en cuadros de ~1 km. Si se corta por tiempo, vuelve a correrlo y sigue.
+function revisarPanes() {
+  const ss = SpreadsheetApp.getActive();
+  const hoja = ss.getSheetByName(HOJA_TIENDAS);
+  let enc = encabezados_(hoja);
+  if (enc.indexOf('Vende') === -1) {
+    hoja.getRange(1, hoja.getLastColumn() + 1).setValue('Vende').setFontWeight('bold');
+    enc = encabezados_(hoja);
+  }
+  const clave = claveGoogle_();
+  const props = PropertiesService.getScriptProperties();
+  const hechos = JSON.parse(props.getProperty('PANES_REVISADOS') || '[]');
+  const datos = hoja.getRange(2, 1, Math.max(hoja.getLastRow() - 1, 1), enc.length).getValues();
+  const cN = enc.indexOf('Nombre'), cLat = enc.indexOf('Lat'), cLng = enc.indexOf('Lng'), cM = enc.indexOf('Maps'), cV = enc.indexOf('Vende');
+  const lugares = [];
+  datos.forEach(function (f, i) {
+    if (!String(f[cN]).trim() || f[cLat] === '' || f[cLng] === '') return;
+    lugares.push({ i: i, nombre: String(f[cN]), lat: Number(f[cLat]), lng: Number(f[cLng]), maps: String(f[cM] || ''),
+      vende: String(f[cV] || '').split(',').map(function (x) { return x.trim(); }).filter(String) });
+  });
+  const cuadros = {};
+  lugares.forEach(function (l) {
+    const k = Math.round(l.lat * 100) + ',' + Math.round(l.lng * 100);
+    if (!cuadros[k]) cuadros[k] = [];
+    cuadros[k].push(l);
+  });
+  const inicio = Date.now();
+  let marcados = 0, pendientes = 0;
+  Object.keys(cuadros).forEach(function (k) {
+    if (hechos.indexOf(k) !== -1) return;
+    if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
+    const grupo = cuadros[k];
+    const lat = grupo.reduce(function (a, l) { return a + l.lat; }, 0) / grupo.length;
+    const lng = grupo.reduce(function (a, l) { return a + l.lng; }, 0) / grupo.length;
+    PANES.forEach(function (pan) {
+      buscarPlaces_(clave, lat, lng, 900, pan.consulta, function (p) {
+        const nombre = p.displayName ? p.displayName.text : '';
+        const l = grupo.filter(function (x) {
+          if (x.maps && x.maps.indexOf(p.googleMapsUri) === 0) return true;
+          const metros = distanciaKm_(x.lat, x.lng, p.location.latitude, p.location.longitude) * 1000;
+          return metros < 15 || (metros < 60 && norm_(x.nombre).slice(0, 6) === norm_(nombre).slice(0, 6));
+        })[0];
+        if (!l) return;
+        const antes = l.vende.length;
+        sumarPanes_(l.vende, [pan.id].concat(panesDe_(p)));
+        if (l.vende.length > antes) { l.cambio = true; marcados++; }
+      });
+    });
+    grupo.forEach(function (l) { if (l.cambio) { hoja.getRange(l.i + 2, cV + 1).setValue(l.vende.join(', ')); l.cambio = false; } });
+    hechos.push(k);
+    props.setProperty('PANES_REVISADOS', JSON.stringify(hechos));
+  });
+  ss.toast(marcados + ' panes marcados en la columna Vende' + (pendientes ? '. Faltan ' + pendientes + ' zonas: vuelve a correrlo.' : '. ¡Todas las zonas revisadas!'), '🥐 Quisito', 15);
 }
 
 // Recorre cada zona de la hoja y agrega las tiendas nuevas que Google conoce alrededor.
@@ -399,13 +545,13 @@ function buscarTiendasGoogle() {
   // (p. ej. "hotel boutique"), se corre solo esa en las colonias ya revisadas.
   const hecha = function (z, q) { return hechas.indexOf(z + '|' + q) !== -1; };
   Object.keys(zonas).forEach(function (z) {
-    const faltan = CONSULTAS_GOOGLE.filter(function (q) { return !hecha(z, q); });
+    const faltan = CONSULTAS_TODAS.filter(function (q) { return !hecha(z, q); });
     if (!faltan.length) return;
     if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
     const c = zonas[z];
     buscarCerca_(c.lat / c.n, c.lng / c.n, 1000, faltan).forEach(function (t) {
       agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: z, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-        maps: t.maps, prioridad: 'Media', notas: notaGoogle_(t) });
+        maps: t.maps, vende: t.vende, prioridad: 'Media', notas: notaGoogle_(t) });
       agregadas++;
     });
     faltan.forEach(function (q) { hechas.push(z + '|' + q); });
@@ -432,9 +578,9 @@ function buscarEnLugar() {
     const valores = {
       'Prioridad': 'Media', 'Zona': zona, 'Tipo': t.tipo, 'Nombre': nombreConCalle_(t.nombre, t.ubicacion),
       'Ubicación': t.ubicacion, 'Visitado': false, 'Maps': t.maps, 'Notas': notaGoogle_(t),
-      'Estado': 'Prospecto', 'Lat': t.lat, 'Lng': t.lng,
+      'Estado': 'Prospecto', 'Lat': t.lat, 'Lng': t.lng, 'Vende': t.vende || '',
     };
-    hoja.appendRow(enc.map(function (c) { return c in valores ? valores[c] : ''; }));
+    agregarFila_(hoja, enc, valores, 'Nombre');
   });
   ui.alert(nuevas.length + ' lugares nuevos agregados en ' + zona + '.');
 }
@@ -468,7 +614,7 @@ function sembrarColonias() {
       const zona = lugar.split(',')[0].trim();
       buscarCerca_(loc.lat, loc.lng, 1200).forEach(function (t) {
         agregarTienda_({ nombre: t.nombre, tipo: t.tipo, zona: zona, ubicacion: t.ubicacion, lat: t.lat, lng: t.lng,
-          maps: t.maps, prioridad: 'Media', notas: notaGoogle_(t) });
+          maps: t.maps, vende: t.vende, prioridad: 'Media', notas: notaGoogle_(t) });
         agregadas++;
       });
     }
@@ -483,6 +629,7 @@ function sembrarColonias() {
 function reiniciarBusquedaGoogle() {
   PropertiesService.getScriptProperties().deleteProperty('ZONAS_BUSCADAS');
   PropertiesService.getScriptProperties().deleteProperty('COLONIAS_SEMBRADAS');
+  PropertiesService.getScriptProperties().deleteProperty('PANES_REVISADOS');
 }
 
 function distanciaKm_(a, b, c, d) {

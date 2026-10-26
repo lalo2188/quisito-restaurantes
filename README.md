@@ -72,6 +72,10 @@ Luego, en la hoja, menú **🥐 Quisito**:
   (la lista está en `COLONIAS_OBJETIVO` de `Code.gs`; edítala a tu gusto). Si se corta por tiempo, vuelve a correrlo.
 - **Buscar en una colonia o municipio nuevo…**: escribe el lugar y agrega lo que haya en 1.5 km.
 - **Buscar restaurantes y cafés en Google (por zona)**: vuelve a revisar todas las colonias que ya tienes en la hoja.
+- **Revisar qué panes venden (brownies, galletas…)**: busca en Google cada pan (brownies, cuernitos, roles, crumble cookies, galletas)
+  por zona y llena la columna `Vende` de los lugares que ya tienes. En el mapa sale el aviso ⚠️ en la ficha y el filtro "¿Qué pan venden?".
+  La lista de panes está en `PANES` de `Code.gs` y `config.js`.
+- **Llenar colonias vacías (desde la dirección)**: pone la colonia a los lugares que se agregaron sin ella.
 - **Quitar cadenas y lugares que no nos interesan**: limpia lo que se haya colado (te enseña la lista antes de borrar).
 - **Actualizar pestaña COLONIAS**: resumen por colonia, estado y tipo, con gráficas.
 - En el mapa: el botón **🔍** busca en la zona que estés viendo.

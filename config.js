@@ -32,6 +32,8 @@ window.QUISITO_CONFIG = {
   // true = la búsqueda 🔍 solo deja cafeterías y restaurantes que sirven postre, desayuno o brunch.
   // (En la hoja se cambia aparte, en Code.gs → SOLO_POSTRE_O_PAN.)
   SOLO_POSTRE_O_PAN: true,
+  // Panes que nos interesa saber si ya venden. Deben coincidir con los "id" de PANES en Code.gs.
+  PANES: ['brownies', 'cuernitos', 'roles', 'crumble cookies', 'galletas'],
   // Centro inicial del mapa (Guadalajara).
   CENTRO: [20.6736, -103.3700],
 };
