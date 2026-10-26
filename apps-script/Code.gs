@@ -293,8 +293,10 @@ function coloniaDeDireccion_(ubicacion) {
   const partes = String(ubicacion || '').split(',').map(function (x) { return x.trim(); });
   let i = -1;
   partes.forEach(function (x, j) { if (/^\d{5}\b/.test(x)) i = j; });
-  const colonia = i > 0 ? partes[i - 1] : '';
-  return /\d/.test(colonia) ? '' : colonia;
+  const colonia = (i > 0 ? partes[i - 1] : '').replace(/^(col\.?|colonia)\s+/i, '').replace(/\s*\(.*\)\s*$/, '');
+  if (/\d/.test(colonia)) return '';
+  // Google escribe el centro de varias formas; las juntamos para que el filtro por colonia no las separe.
+  return /^(zona centro|centro hist[oó]rico)$/i.test(colonia) ? 'Centro' : colonia;
 }
 
 function llenarZonasVacias() {
