@@ -831,8 +831,56 @@
       L.marker([c.lat, c.lng], {
         icon: L.divIcon({ className: 'leaflet-div-icon limpio', html: '<div class="pin-nuevo">+</div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
         title: c.nombre,
-      }).on('click', () => abrirNuevas(i)).addTo(capaNuevas);
+      }).on('click', () => abrirNueva(i)).addTo(capaNuevas);
     });
+  }
+
+  // Ficha de un solo lugar encontrado (igual que la de un lugar de la lista), con botón para agregarlo.
+  function abrirNueva(i) {
+    const c = (st.nuevas || [])[i]; if (!c) return;
+    mapa.flyTo([c.lat, c.lng], Math.max(mapa.getZoom(), 16), { duration: .6 });
+    const destino = c.lat + ',' + c.lng;
+    abrirHoja(
+      '<div class="top"><h3 class="disp">' + esc(c.nombre) + '</h3><button class="cerrar" data-cerrar>✕</button></div>' +
+      '<div style="margin-bottom:10px"><span class="badge" style="background:var(--cacao)">Nuevo · aún no está en tu lista</span></div>' +
+      '<div class="meta"><span>🏷️ ' + esc(c.tipo) + '</span><span>📍 ' + esc(c.ubicacion || 'Sin dirección') + '</span>' +
+        (c.zona ? '<span>🗺️ ' + esc(c.zona) + '</span>' : '') +
+        (c.ofrece ? '<span>🍰 Sirve: ' + esc(c.ofrece) + '</span>' : '') +
+        (c.rating ? '<span>⭐ ' + esc(c.rating) + '</span>' : '') +
+        '<span>📝 Encontrado en ' + esc(st.fuenteNuevas || 'el mapa') + '</span></div>' +
+      '<div class="acciones">' +
+        '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destino) + '">🧭 Cómo llegar</a>' +
+        '<a class="btn sec" target="_blank" rel="noopener" href="' + esc(c.maps || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.nombre + ' ' + c.ubicacion)) + '">🔎 Ver en Maps</a>' +
+        '<button class="btn" id="nv-una">➕ Agregar a mi lista</button>' +
+        '<button class="btn sec" id="nv-quitar">✕ No me interesa</button>' +
+      '</div>' +
+      '<div id="form-extra"></div>' +
+      '<button class="btn sec" style="width:100%" id="nv-lista">Ver los ' + st.nuevas.length + ' lugares nuevos de esta zona</button>'
+    );
+    $('#nv-lista').onclick = () => abrirNuevas();
+    $('#nv-quitar').onclick = () => { st.nuevas.splice(i, 1); pintarNuevas(); cerrarHoja(); };
+    $('#nv-una').onclick = async () => {
+      const d = { accion: 'tienda', nombre: c.nombre, tipo: c.tipo, prioridad: 'Media', zona: c.zona, ubicacion: c.ubicacion, lat: c.lat, lng: c.lng, maps: c.maps,
+        notas: 'Encontrado en ' + (st.fuenteNuevas || 'el mapa') + (c.ofrece ? ' · Sirve: ' + c.ofrece : '') + (c.rating ? ' · ⭐ ' + c.rating : '') };
+      if (!CFG.SCRIPT_URL) {
+        $('#form-extra').innerHTML = sinScriptHTML([d.prioridad, d.zona, d.tipo, d.nombre, d.ubicacion, 'FALSE',
+          d.maps || 'https://www.google.com/maps/search/?api=1&query=' + d.lat + ',' + d.lng, d.notas, 'Prospecto', d.lat, d.lng, '', ''].join('\t'), CFG.HOJA_LUGARES);
+        return;
+      }
+      const boton = $('#nv-una'); boton.disabled = true; boton.textContent = 'Agregando…';
+      try {
+        const r = await enviar(d);
+        if (!r.ok) throw new Error(r.error || 'error');
+      } catch (e) { toast('No se agregó: ' + e.message, 8000); boton.disabled = false; boton.textContent = '➕ Agregar a mi lista'; return; }
+      st.nuevas = st.nuevas.filter((x) => x !== c);
+      pintarNuevas();
+      toast('Agregado a tu lista 🍽️');
+      await cargar();
+      // Abre su ficha completa (pedido, degustación, ruta…). El script puede haberle agregado la calle al nombre.
+      const t = st.tiendas.find((x) => c.maps && x.maps === c.maps)
+        || st.tiendas.filter((x) => x.lat).sort((a, b) => distanciaKm([c.lat, c.lng], [a.lat, a.lng]) - distanciaKm([c.lat, c.lng], [b.lat, b.lng]))[0];
+      if (t) abrirTienda(t.id); else cerrarHoja();
+    };
   }
 
   function abrirNuevas(foco) {
