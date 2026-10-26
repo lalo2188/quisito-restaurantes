@@ -72,7 +72,7 @@ function onOpen() {
     .addItem('Llenar con las colonias top de GDL y Zapopan', 'sembrarColonias')
     .addItem('Buscar restaurantes y cafés en Google (por zona)', 'buscarTiendasGoogle')
     .addItem('Buscar en una colonia o municipio nuevo…', 'buscarEnLugar')
-    .addItem('Revisar qué panes venden (brownies, galletas…)', 'revisarPanes')
+    .addItem('Revisar qué productos venden (pestaña Productos a buscar)', 'revisarPanes')
     .addItem('Llenar colonias vacías (desde la dirección)', 'llenarZonasVacias')
     .addItem('Llenar teléfonos y páginas web (desde Google)', 'llenarTelefonos')
     .addItem('Actualizar pestaña COLONIAS', 'armarColonias')
@@ -178,6 +178,7 @@ function doGet(e) {
     ok: true,
     tiendas: filas_(ss.getSheetByName(HOJA_TIENDAS)),
     entregas: filas_(ss.getSheetByName(HOJA_ENTREGAS)),
+    productos: panes_().map(function (x) { return x.id; }),
   });
 }
 
@@ -369,17 +370,51 @@ function notaGoogle_(t) {
   return 'Encontrado en Google Maps' + (t.ofrece ? ' · Sirve: ' + t.ofrece : '');
 }
 
-// Panes que nos interesa saber si ya venden (para ofrecerles los nuestros).
-// "consulta" es lo que se le pregunta a Google en la zona; "re" se busca en el nombre, la descripción y las reseñas.
-var PANES = [
-  { id: 'brownies', consulta: 'brownies', re: /brownie/i },
-  { id: 'cuernitos', consulta: 'cuernitos croissant', re: /cuernit|croissant|cruas[aá]n/i },
-  { id: 'roles', consulta: 'roles de canela', re: /\broles?\b|cinnamon ?roll/i },
-  { id: 'crumble cookies', consulta: 'crumble cookies', re: /crumbl/i },
-  { id: 'galletas', consulta: 'galletas', re: /galleta|cookie/i },
+// Productos que nos interesa saber si ya venden (para ofrecerles los nuestros). Se editan en la pestaña
+// "Productos a buscar" de la hoja: Producto · Buscar en Google · Palabras (separadas por coma).
+// "Buscar en Google" se le pregunta a Google en cada zona; las "Palabras" se buscan en el nombre, la descripción
+// y las reseñas del lugar. Si la pestaña no existe, se crea con esta lista.
+var HOJA_BUSCAR = 'Productos a buscar';
+var PRODUCTOS_INICIALES = [
+  ['Galletas New York', 'galletas new york', 'galleta new york, galletas new york, new york cookie, new york cookies, cookie, cookies, galleta, galletas'],
+  ['Panqués', 'panqué', 'panque, panques, panquecito, panquecitos, pan de platano, banana bread, pan de elote, muffin, muffins, pound cake, panque de nuez, panque de naranja'],
+  ['Roles de canela', 'roles de canela', 'rol de canela, roles de canela, rol, roles, rollo de canela, rollos de canela, cinnamon roll, cinnamon rolls'],
+  ['Pan de muerto', 'pan de muerto', 'pan de muerto, panes de muerto'],
 ];
 var BUSCAR_PANES = true;
-var CONSULTAS_TODAS = CONSULTAS_GOOGLE.concat(BUSCAR_PANES ? PANES.map(function (x) { return x.consulta; }) : []);
+var PANES_ = null;
+
+function hojaBuscar_() {
+  const ss = SpreadsheetApp.getActive();
+  let h = ss.getSheetByName(HOJA_BUSCAR);
+  if (!h) {
+    h = ss.insertSheet(HOJA_BUSCAR);
+    h.getRange(1, 1, 1, 3).setValues([['Producto', 'Buscar en Google', 'Palabras (separadas por coma)']])
+      .setFontWeight('bold').setBackground('#5A3825').setFontColor('#FFFFFF');
+    h.getRange(2, 1, PRODUCTOS_INICIALES.length, 3).setValues(PRODUCTOS_INICIALES);
+    h.setFrozenRows(1);
+    h.setColumnWidth(1, 180); h.setColumnWidth(2, 200); h.setColumnWidth(3, 520);
+  }
+  return h;
+}
+
+// Lista de productos: { id, consulta, re }. Las palabras se comparan sin acentos ni mayúsculas.
+function panes_() {
+  if (PANES_) return PANES_;
+  const h = hojaBuscar_();
+  const filas = h.getLastRow() > 1 ? h.getRange(2, 1, h.getLastRow() - 1, 3).getValues() : [];
+  PANES_ = filas.filter(function (f) { return String(f[0]).trim(); }).map(function (f) {
+    const id = String(f[0]).trim();
+    const palabras = String(f[2] || f[1] || id).split(',').map(function (w) { return norm_(w); }).filter(String)
+      .map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'); });
+    return { id: id, consulta: String(f[1]).trim() || id, re: new RegExp('\\b(' + palabras.join('|') + ')\\b', 'i') };
+  });
+  return PANES_;
+}
+
+function consultasTodas_() {
+  return CONSULTAS_GOOGLE.concat(BUSCAR_PANES ? panes_().map(function (x) { return x.consulta; }) : []);
+}
 
 function claveGoogle_() {
   const clave = PropertiesService.getScriptProperties().getProperty('GOOGLE_PLACES_KEY');
@@ -425,7 +460,8 @@ function panesDe_(p) {
   const texto = [p.displayName ? p.displayName.text : '', p.editorialSummary ? p.editorialSummary.text : '']
     .concat((p.reviews || []).map(function (r) { return (r.text && r.text.text) || (r.originalText && r.originalText.text) || ''; }))
     .join(' \n ');
-  return PANES.filter(function (x) { return x.re.test(texto); }).map(function (x) { return x.id; });
+  const t = norm_(texto);
+  return panes_().filter(function (x) { return x.re.test(t); }).map(function (x) { return x.id; });
 }
 
 function sumarPanes_(lista, nuevos) {
@@ -437,9 +473,9 @@ function buscarCerca_(lat, lng, radio, consultas) {
   const clave = claveGoogle_();
   const existentes = filas_(SpreadsheetApp.getActive().getSheetByName(HOJA_TIENDAS));
   const panPorConsulta = {};
-  PANES.forEach(function (x) { panPorConsulta[x.consulta] = x.id; });
+  panes_().forEach(function (x) { panPorConsulta[x.consulta] = x.id; });
   const descartados = {}, porId = {}, salida = [];
-  (consultas || CONSULTAS_TODAS).forEach(function (consulta) {
+  (consultas || consultasTodas_()).forEach(function (consulta) {
     const pan = panPorConsulta[consulta];
     buscarPlaces_(clave, lat, lng, radio, consulta, function (p) {
       // Si Google lo devuelve al buscar "brownies", lo relaciona con brownies (por su menú o reseñas).
@@ -529,7 +565,10 @@ function revisarPanes() {
   }
   const clave = claveGoogle_();
   const props = PropertiesService.getScriptProperties();
-  const hechos = JSON.parse(props.getProperty('PANES_REVISADOS') || '[]');
+  // Se recuerda cada zona + producto: si agregas un producto nuevo en la pestaña, solo se busca ese.
+  const hechos = JSON.parse(props.getProperty('PRODUCTOS_REVISADOS') || '[]');
+  const lista = panes_();
+  const vigentes = lista.map(function (x) { return x.id; });
   const datos = hoja.getRange(2, 1, Math.max(hoja.getLastRow() - 1, 1), enc.length).getValues();
   const cN = enc.indexOf('Nombre'), cLat = enc.indexOf('Lat'), cLng = enc.indexOf('Lng'), cM = enc.indexOf('Maps'), cV = enc.indexOf('Vende');
   const lugares = [];
@@ -537,6 +576,12 @@ function revisarPanes() {
     if (!String(f[cN]).trim() || f[cLat] === '' || f[cLng] === '') return;
     lugares.push({ i: i, nombre: String(f[cN]), lat: Number(f[cLat]), lng: Number(f[cLng]), maps: String(f[cM] || ''),
       vende: String(f[cV] || '').split(',').map(function (x) { return x.trim(); }).filter(String) });
+  });
+  // Quita de "Vende" los productos que ya no están en la pestaña.
+  lugares.forEach(function (l) {
+    const antes = l.vende.length;
+    l.vende = l.vende.filter(function (x) { return vigentes.indexOf(x) !== -1; });
+    if (l.vende.length !== antes) l.cambio = true;
   });
   const cuadros = {};
   lugares.forEach(function (l) {
@@ -547,12 +592,16 @@ function revisarPanes() {
   const inicio = Date.now();
   let marcados = 0, pendientes = 0;
   Object.keys(cuadros).forEach(function (k) {
-    if (hechos.indexOf(k) !== -1) return;
-    if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
     const grupo = cuadros[k];
+    const faltan = lista.filter(function (pan) { return hechos.indexOf(k + '|' + pan.id) === -1; });
+    if (!faltan.length) {
+      grupo.forEach(function (l) { if (l.cambio) hoja.getRange(l.i + 2, cV + 1).setValue(l.vende.join(', ')); });
+      return;
+    }
+    if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
     const lat = grupo.reduce(function (a, l) { return a + l.lat; }, 0) / grupo.length;
     const lng = grupo.reduce(function (a, l) { return a + l.lng; }, 0) / grupo.length;
-    PANES.forEach(function (pan) {
+    faltan.forEach(function (pan) {
       buscarPlaces_(clave, lat, lng, 900, pan.consulta, function (p) {
         const nombre = p.displayName ? p.displayName.text : '';
         const l = grupo.filter(function (x) {
@@ -562,15 +611,15 @@ function revisarPanes() {
         })[0];
         if (!l) return;
         const antes = l.vende.length;
-        sumarPanes_(l.vende, [pan.id].concat(panesDe_(p)));
+        sumarPanes_(l.vende, [pan.id].concat(panesDe_(p).filter(function (x) { return faltan.some(function (f) { return f.id === x; }); })));
         if (l.vende.length > antes) { l.cambio = true; marcados++; }
       });
     });
     grupo.forEach(function (l) { if (l.cambio) { hoja.getRange(l.i + 2, cV + 1).setValue(l.vende.join(', ')); l.cambio = false; } });
-    hechos.push(k);
-    props.setProperty('PANES_REVISADOS', JSON.stringify(hechos));
+    faltan.forEach(function (pan) { hechos.push(k + '|' + pan.id); });
+    props.setProperty('PRODUCTOS_REVISADOS', JSON.stringify(hechos));
   });
-  ss.toast(marcados + ' panes marcados en la columna Vende' + (pendientes ? '. Faltan ' + pendientes + ' zonas: vuelve a correrlo.' : '. ¡Todas las zonas revisadas!'), '🥐 Quisito', 15);
+  ss.toast(marcados + ' productos marcados en la columna Vende' + (pendientes ? '. Faltan ' + pendientes + ' zonas: vuelve a correrlo.' : '. ¡Todas las zonas revisadas!'), '🥐 Quisito', 15);
 }
 
 // Recorre cada zona de la hoja y agrega las tiendas nuevas que Google conoce alrededor.
@@ -594,7 +643,7 @@ function buscarTiendasGoogle() {
   // (p. ej. "hotel boutique"), se corre solo esa en las colonias ya revisadas.
   const hecha = function (z, q) { return hechas.indexOf(z + '|' + q) !== -1; };
   Object.keys(zonas).forEach(function (z) {
-    const faltan = CONSULTAS_TODAS.filter(function (q) { return !hecha(z, q); });
+    const faltan = consultasTodas_().filter(function (q) { return !hecha(z, q); });
     if (!faltan.length) return;
     if (Date.now() - inicio > 4.5 * 60 * 1000) { pendientes++; return; }
     const c = zonas[z];
@@ -678,7 +727,7 @@ function sembrarColonias() {
 function reiniciarBusquedaGoogle() {
   PropertiesService.getScriptProperties().deleteProperty('ZONAS_BUSCADAS');
   PropertiesService.getScriptProperties().deleteProperty('COLONIAS_SEMBRADAS');
-  PropertiesService.getScriptProperties().deleteProperty('PANES_REVISADOS');
+  PropertiesService.getScriptProperties().deleteProperty('PRODUCTOS_REVISADOS');
   PropertiesService.getScriptProperties().deleteProperty('TELEFONOS_BUSCADOS');
 }
 

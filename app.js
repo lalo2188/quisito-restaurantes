@@ -74,6 +74,11 @@
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   }
+  // Productos de "Vende" que siguen en la pestaña Productos a buscar (los viejos ya no se muestran).
+  const vendeDe = (x) => {
+    const lista = (st.productos || []).map(norm);
+    return String((x && x.vende) || '').split(',').map((v) => v.trim()).filter((v) => v && (!lista.length || lista.includes(norm(v)))).join(', ');
+  };
   const esMuestra = (e) => norm(e.tipoPedido) === 'degustacion';
   const zonaBase = (z) => String(z || 'Sin zona').split('/')[0].trim() || 'Sin zona';
 
@@ -112,14 +117,14 @@
           const m = txt.match(/<div[^>]*>([^<]{10,200})<\/div>/) || txt.match(/<title>([^<]+)<\/title>/);
           throw new Error(m ? m[1].trim() : 'respuesta que no es JSON');
         }
-        if (d.ok && Array.isArray(d.tiendas)) { crudo = { tiendas: d.tiendas, entregas: d.entregas || [] }; st.fuente = 'script'; }
+        if (d.ok && Array.isArray(d.tiendas)) { crudo = { tiendas: d.tiendas, entregas: d.entregas || [], productos: d.productos }; st.fuente = 'script'; }
         else throw new Error(d.error || 'respuesta sin tiendas');
       } catch (e) {
         motivoScript = (e.name === 'AbortError' ? 'tardó más de 25 s' : (e.message || String(e))).replace(/\.$/, '');
         // Segundo intento sin CORS (etiqueta <script>).
         try {
           const d = await pedirScript('', 30000);
-          if (d.ok && Array.isArray(d.tiendas)) { crudo = { tiendas: d.tiendas, entregas: d.entregas || [] }; st.fuente = 'script'; motivoScript = ''; }
+          if (d.ok && Array.isArray(d.tiendas)) { crudo = { tiendas: d.tiendas, entregas: d.entregas || [], productos: d.productos }; st.fuente = 'script'; motivoScript = ''; }
         } catch (e2) { /* sigue con lectura directa */ }
         if (motivoScript) console.warn('Apps Script no respondió (' + motivoScript + '), uso lectura directa');
       }
@@ -134,7 +139,12 @@
           // Si la pestaña no existe, Google devuelve la primera hoja: lo detectamos por las columnas.
           if (e.length && 'Lugar' in e[0]) entregas = e;
         } catch (err) { /* aún no hay pestaña Pedidos */ }
-        crudo = { tiendas, entregas }; st.fuente = 'hoja';
+        let productos = null;
+        try {
+          const pr = await leerGviz(CFG.HOJA_BUSCAR || 'Productos a buscar');
+          if (pr.length && 'Producto' in pr[0]) productos = pr.map((x) => String(x.Producto || '').trim()).filter(Boolean);
+        } catch (err) { /* aún no hay pestaña de productos */ }
+        crudo = { tiendas, entregas, productos }; st.fuente = 'hoja';
       } catch (e) {
         console.error(e);
         estadoCarga('');
@@ -145,6 +155,7 @@
     try {
       st.tiendas = crudo.tiendas.map(normalizarTienda).filter((t) => t.nombre);
       st.entregas = crudo.entregas.map(normalizarEntrega).filter((e) => e.tienda && e.fecha);
+      st.productos = Array.isArray(crudo.productos) && crudo.productos.length ? crudo.productos : (CFG.PANES || []);
       calcularEstados();
       pintarTodo();
     } catch (e) {
@@ -309,9 +320,9 @@
     return st.tiendas.filter((t) => st.filtroEstados.has(t.estado)
       && (!zona || zonaBase(t.zona) === zona)
       && (!tipo || t.tipo === tipo)
-      && (!pan || (pan === '*' ? !!t.vende : norm(t.vende).split(/\s*,\s*/).includes(norm(pan))))
+      && (!pan || (pan === '*' ? !!vendeDe(t) : norm(vendeDe(t)).split(/\s*,\s*/).includes(norm(pan))))
       && (!prio || norm(t.prioridad) === prio)
-      && (!texto || norm(t.nombre + ' ' + t.zona + ' ' + t.ubicacion + ' ' + t.tipo + ' ' + t.notas + ' ' + t.contacto + ' ' + t.vende).includes(texto)));
+      && (!texto || norm(t.nombre + ' ' + t.zona + ' ' + t.ubicacion + ' ' + t.tipo + ' ' + t.notas + ' ' + t.contacto + ' ' + vendeDe(t)).includes(texto)));
   }
 
   function pintarMapa() {
@@ -354,9 +365,9 @@
     const tipos = [...new Set(st.tiendas.map((t) => t.tipo).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
     selT.innerHTML = '<option value="">Todo tipo</option>' + tipos.map((z) => '<option' + (z === actualT ? ' selected' : '') + '>' + esc(z) + '</option>').join('');
     const selP = $('#f-pan'), actualP = selP.value;
-    const conPan = (x) => st.tiendas.filter((t) => x === '*' ? t.vende : norm(t.vende).split(/\s*,\s*/).includes(norm(x))).length;
+    const conPan = (x) => st.tiendas.filter((t) => x === '*' ? vendeDe(t) : norm(vendeDe(t)).split(/\s*,\s*/).includes(norm(x))).length;
     selP.innerHTML = '<option value="">¿Qué pan venden?</option>' +
-      ['*'].concat(CFG.PANES || []).map((x) => '<option value="' + esc(x) + '"' + (x === actualP ? ' selected' : '') + '>' + (x === '*' ? '🥐 Venden alguno' : esc(x.charAt(0).toUpperCase() + x.slice(1))) + ' · ' + conPan(x) + '</option>').join('');
+      ['*'].concat(st.productos || []).map((x) => '<option value="' + esc(x) + '"' + (x === actualP ? ' selected' : '') + '>' + (x === '*' ? '🥐 Venden alguno' : esc(x.charAt(0).toUpperCase() + x.slice(1))) + ' · ' + conPan(x) + '</option>').join('');
   }
 
   function textoEstado(t) {
@@ -376,7 +387,7 @@
     $('#lista-tiendas').innerHTML = lista.length ? lista.map((t) =>
       '<button class="item" data-tienda="' + t.id + '">' +
         '<span class="punto" style="background:' + ESTADOS[t.estado].color + ';width:12px;height:12px"></span>' +
-        '<span><span class="n">' + esc(t.nombre) + '</span><br><span class="m">' + esc(t.tipo) + ' · ' + esc(zonaBase(t.zona)) + ' · ' + esc(t.prioridad) + (t.lat ? '' : ' · <b>sin ubicación</b>') + (t.vende ? '<br><span class="vende">🥐 ' + esc(t.vende) + '</span>' : '') + '</span></span>' +
+        '<span><span class="n">' + esc(t.nombre) + '</span><br><span class="m">' + esc(t.tipo) + ' · ' + esc(zonaBase(t.zona)) + ' · ' + esc(t.prioridad) + (t.lat ? '' : ' · <b>sin ubicación</b>') + (vendeDe(t) ? '<br><span class="vende">🥐 ' + esc(vendeDe(t)) + '</span>' : '') + '</span></span>' +
         '<span class="badge" style="background:' + ESTADOS[t.estado].color + '">' + esc(textoEstado(t)) + '</span>' +
       '</button>').join('') : '<div class="vacio">Ningún lugar con esos filtros.</div>';
   }
@@ -570,7 +581,7 @@
         (t.telefono ? '<span>📞 <a href="tel:' + esc(t.telefono.replace(/[^\d+]/g, '')) + '">' + esc(t.telefono) + '</a></span>' : '') +
         (/^https?:\/\//.test(t.web) ? '<span>🌐 <a target="_blank" rel="noopener" href="' + esc(t.web) + '">Su página (menú)</a></span>' : '') +
         (t.notas ? '<span>📝 ' + esc(t.notas) + '</span>' : '') + '</div>' +
-      avisoPan(t.vende) +
+      avisoPan(vendeDe(t)) +
       '<div class="acciones">' +
         '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destino) + '">🧭 Cómo llegar</a>' +
         '<button class="btn sec" data-ruta-toggle="' + t.id + '">' + (enRuta ? '✓ En la ruta' : '➕ Agregar a ruta') + '</button>' +
@@ -865,7 +876,7 @@
         (c.telefono ? '<span>📞 <a href="tel:' + esc(c.telefono.replace(/[^\d+]/g, '')) + '">' + esc(c.telefono) + '</a></span>' : '') +
         (/^https?:\/\//.test(c.web) ? '<span>🌐 <a target="_blank" rel="noopener" href="' + esc(c.web) + '">Su página (menú)</a></span>' : '') +
         '<span>📝 Encontrado en ' + esc(st.fuenteNuevas || 'el mapa') + '</span></div>' +
-      avisoPan(c.vende) +
+      avisoPan(vendeDe(c)) +
       '<div class="acciones">' +
         '<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destino) + '">🧭 Cómo llegar</a>' +
         '<a class="btn sec" target="_blank" rel="noopener" href="' + esc(c.maps || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.nombre + ' ' + c.ubicacion)) + '">🔎 Ver en Maps</a>' +
@@ -912,7 +923,7 @@
       '<div class="lista">' + lista.map((c, i) =>
         '<label class="item" style="grid-template-columns:auto 1fr;cursor:pointer;color:var(--ink);font-size:inherit;font-weight:inherit;margin:0' + (i === foco ? ';border-color:var(--rojo)' : '') + '">' +
         '<input type="checkbox" data-nueva="' + i + '"' + (foco == null || i === foco ? ' checked' : '') + ' style="width:auto">' +
-        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.ofrece ? ' · 🍰 ' + esc(c.ofrece) : '') + (c.vende ? ' · 🥐 ' + esc(c.vende) : '') + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
+        '<span><span class="n">' + esc(c.nombre) + '</span><br><span class="m">' + esc(c.tipo) + (c.ofrece ? ' · 🍰 ' + esc(c.ofrece) : '') + (vendeDe(c) ? ' · 🥐 ' + esc(vendeDe(c)) : '') + (c.rating ? ' · ⭐ ' + esc(c.rating) : '') + (c.zona ? ' · ' + esc(c.zona) : '') + '<br>' + esc(c.ubicacion) + '</span></span></label>').join('') + '</div>' +
       '<div id="form-extra"></div>' +
       '<button class="btn" style="width:100%;margin-top:12px" id="nv-agregar">Agregar seleccionadas a mi lista</button>'
     );
