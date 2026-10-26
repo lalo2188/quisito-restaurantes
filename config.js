@@ -4,7 +4,7 @@ window.QUISITO_CONFIG = {
   // ID de la hoja "Quisito - Prospectos restaurantes y cafeterías".
   // Es lo que va entre /d/ y /edit en la liga de la hoja.
   // La hoja debe estar compartida como "Cualquier persona con el enlace: lector".
-  SHEET_ID: '',
+  SHEET_ID: '1d_HCwfO-oL_tOFqaF2q1aZnrc3KQvNi7bEraaPnCXQ4',
   HOJA_LUGARES: 'Prospectos',
   HOJA_PEDIDOS: 'Pedidos',
 
