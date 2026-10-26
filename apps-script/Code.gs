@@ -287,7 +287,7 @@ var TIPOS_FUERA = ['fast_food_restaurant', 'hamburger_restaurant', 'pizza_restau
   'convenience_store', 'grocery_store', 'supermarket'];
 var CADENAS = /starbucks|vips|sanborns|toks|wings|cielito querido|punta del cielo|italian coffee|the coffee factory|finca santa veracruz|tim hortons|krispy|dunkin|mcdonald|burger king|kfc|carl'?s|subway|domino|little caesars|pizza hut|papa john|benedetti|chili'?s|applebee|olive garden|hooters|buffalo wild|p\.?f\.? chang|panda express|sushi itto|wingstop|oxxo|7[\s-]?eleven|walmart|costco|sam'?s|soriana|chedraui|la comer|fresko|liverpool|el globo|bisquets obreg[oó]n|potzollcalli|nutrisa|la michoacana|holanda|santa clara|churrer[ií]a el moro|la parroquia de veracruz/i;
 // Por nombre: comida que no lleva pan ni postre, o competencia directa.
-var NO_INTERESA = /taquer[ií]a|tacos|birria|torta ahogada|mariscos|pozole|hot ?dog|hamburguesas?|pizzer[ií]a|pollo|alitas|panader[ií]a|pasteler[ií]a|reposter[ií]a|helader[ií]a|paleter[ií]a|never[ií]a|\bbar\b|cantina|antro|cervecer[ií]a|mezcaler[ií]a/i;
+var NO_INTERESA = /taquer[ií]a|tacos|torta|lonche|menuder|mar y tierra|carnes? en su jugo|carnitas|barbacoa|tamal|gordita|sope|enchilad|tostad|elote|esquite|ceviche|aguachile|marisc|sushi|ramen|wings|cocina china|comida china|buffet chino|carne asada|parrilla|cortes|steak|antojitos|cenadur|fruter|jugos|licuados|agua fresca|smoothie|birria|torta ahogada|mariscos|pozole|hot ?dog|hamburguesas?|pizzer[ií]a|pollo|alitas|panader[ií]a|pasteler[ií]a|reposter[ií]a|helader[ií]a|paleter[ií]a|never[ií]a|\bbar\b|cantina|antro|cervecer[ií]a|mezcaler[ií]a/i;
 function noInteresa_(nombre) {
   return CADENAS.test(nombre) || NO_INTERESA.test(nombre);
 }
